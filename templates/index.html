@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B&W Image Search</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Image Search</h1>
+            <form method="POST" action="/">
+                <!-- Search bar -->
+                <div class="search-bar">
+                    <input type="text" name="query" placeholder="Search for images..." value="{{ query }}" required>
+                    <button type="submit">Search</button>
+                </div>
+
+                <!-- Method selector segmented control -->
+                <div class="method-selector">
+                    <label class="method-option">
+                        <input type="radio" name="method" value="ddgs" {% if method == 'ddgs' %}checked{% endif %}>
+                        <span>DuckDuckGo</span>
+                    </label>
+                    <label class="method-option">
+                        <input type="radio" name="method" value="pinterest" {% if method == 'pinterest' %}checked{% endif %}>
+                        <span>Pinterest</span>
+                    </label>
+                    <label class="method-option">
+                        <input type="radio" name="method" value="mix" {% if method == 'mix' or not method %}checked{% endif %}>
+                        <span>Mix</span>
+                    </label>
+                </div>
+            </form>
+        </header>
+        
+        <main>
+            {% if images %}
+                <p class="results-count">Showing 50 randomized results</p>
+                <div class="image-grid">
+                    {% for img in images %}
+                        <div class="image-card" onclick="copyToClipboard('{{ img }}')">
+                            <!-- onerror hides the card if the link is broken -->
+                            <img src="{{ img }}" alt="Search result" loading="lazy" onerror="this.parentElement.style.display='none';">
+                            <div class="overlay">
+                                <span>Copy URL</span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% elif query %}
+                <p class="no-results">No images found for "{{ query }}" with search method "{{ method | upper }}".</p>
+            {% endif %}
+        </main>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast">URL Copied to Clipboard!</div>
+
+    <script>
+        function copyToClipboard(url) {
+            navigator.clipboard.writeText(url).then(() => {
+                const toast = document.getElementById("toast");
+                toast.className = "show";
+                setTimeout(() => { 
+                    toast.className = toast.className.replace("show", ""); 
+                }, 3000);
+            }).catch(err => {
+                console.error('Failed to copy URL: ', err);
+            });
+        }
+    </script>
+</body>
+</html>
