@@ -1,4 +1,5 @@
 flask
 duckduckgo-search
+ddgs
 pinscrape
 selenium
