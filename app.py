@@ -1,79 +1,92 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from ddgs import DDGS
 from pinscrape import Pinterest
 import concurrent.futures
 import random
-import os
 
 app = Flask(__name__)
 
-def fetch_ddg_images(query, limit=80):
+def fetch_ddg_images(query, limit):
     """Fetch image URLs from DuckDuckGo."""
     urls = []
     try:
         with DDGS() as ddgs:
-            # We request slightly more results (80) than needed to enable high randomization
             results = ddgs.images(query, max_results=limit)
             urls = [res.get('image') for res in results if res.get('image')]
     except Exception as e:
         print(f"DuckDuckGo Error: {e}")
     return urls
 
-def fetch_pinterest_images(query, limit=70):
+def fetch_pinterest_images(query, limit):
     """Fetch image URLs from Pinterest using pinscrape."""
     urls = []
     try:
         p = Pinterest(sleep_time=1)
-        # Fetching up to 70 allows a healthy pool of random images
         urls = p.search(query, limit)
     except Exception as e:
         print(f"Pinterest Error: {e}")
     return urls
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    images = []
-    query = ''
-    method = 'mix'  # 'mix' is the default option
-    
-    if request.method == 'POST':
-        query = request.form.get('query', '').strip()
-        method = request.form.get('method', 'mix').strip()
-        
-        if query:
-            if method == 'ddgs':
-                # Fetch 80, shuffle them randomly, then slice the top 50
-                raw_urls = fetch_ddg_images(query, limit=80)
-                random.shuffle(raw_urls)
-                images = raw_urls[:50]
-                
-            elif method == 'pinterest':
-                # Fetch 70, shuffle them randomly, then slice the top 50
-                raw_urls = fetch_pinterest_images(query, limit=70)
-                random.shuffle(raw_urls)
-                images = raw_urls[:50]
-                
-            else:  # mix
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    # Fetch 50 from each engine concurrently
-                    future_ddg = executor.submit(fetch_ddg_images, query, 50)
-                    future_pin = executor.submit(fetch_pinterest_images, query, 50)
-                    
-                    ddg_urls = future_ddg.result()
-                    pin_urls = future_pin.result()
-                    
-                    # Combine results and remove duplicates
-                    combined_pool = list(set(ddg_urls + pin_urls))
-                    combined_pool = [x for x in combined_pool if x]
-                    
-                    # Shuffle the combined pool to create a completely random feed
-                    random.shuffle(combined_pool)
-                    
-                    # Slice the final mixed pool down to exactly 50
-                    images = combined_pool[:50]
+    return render_template('index.html')
 
-    return render_template('index.html', images=images, query=query, method=method)
+@app.route('/api/search')
+def api_search():
+    query = request.args.get('query', '').strip()
+    method = request.args.get('method', 'mix').strip()
+    page = int(request.args.get('page', 1))
+    
+    limit = 50
+    offset = (page - 1) * limit
+    
+    # Calculate target range to pull from the APIs
+    total_to_fetch = min(offset + limit, 1000)
+    
+    images = []
+    if query:
+        if method == 'ddgs':
+            raw_urls = fetch_ddg_images(query, limit=total_to_fetch)
+            page_slice = raw_urls[offset : offset + limit]
+            random.shuffle(page_slice)
+            images = page_slice
+            
+        elif method == 'pinterest':
+            # Cap Pinterest scraping to keep response times fast
+            pin_fetch_limit = min(total_to_fetch, 250)
+            raw_urls = fetch_pinterest_images(query, limit=pin_fetch_limit)
+            page_slice = raw_urls[offset : offset + limit]
+            random.shuffle(page_slice)
+            images = page_slice
+            
+        else:  # mix
+            half_total = total_to_fetch // 2
+            half_offset = offset // 2
+            half_limit = limit // 2
+            
+            # Ensure index safety limits
+            if half_total < 1:
+                half_total = 1
+                
+            pin_fetch_limit = min(half_total, 125)
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future_ddg = executor.submit(fetch_ddg_images, query, half_total)
+                future_pin = executor.submit(fetch_pinterest_images, query, pin_fetch_limit)
+                
+                ddg_res = future_ddg.result()
+                pin_res = future_pin.result()
+                
+                ddg_slice = ddg_res[half_offset : half_offset + half_limit]
+                pin_slice = pin_res[half_offset : half_offset + half_limit]
+                
+                # Combine, deduplicate, and shuffle
+                combined = list(set(ddg_slice + pin_slice))
+                combined = [x for x in combined if x]
+                random.shuffle(combined)
+                images = combined[:limit]
+
+    return jsonify({"images": images})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True)
